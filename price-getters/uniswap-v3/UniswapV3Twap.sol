@@ -7,10 +7,13 @@ import {IERC20Metadata} from "./interfaces/IERC20Metadata.sol";
 
 contract UniswapV3Twap {
   IUniswapV3Pool public immutable pool;
+  address public owner;
+  int24 public maxDeviation = 2;
 
   constructor(address _pool) {
     require(_pool != address(0), "!pool");
     pool = IUniswapV3Pool(_pool);
+    owner = msg.sender;
   }
 
   function estimateAmountOut(
@@ -22,8 +25,24 @@ contract UniswapV3Twap {
     address token1 = pool.token1();
     require(tokenIn == token0 || tokenIn == token1, "!token");
     address tokenOut = tokenIn == token0 ? token1 : token0;
-    (int24 tick,) = OracleLibrary.consult(address(pool), secondsAgo);
-    amountOut = OracleLibrary.getQuoteAtTick(tick, amountIn, tokenIn, tokenOut);
+    (int24 twapTick,) = OracleLibrary.consult(address(pool), secondsAgo);
+    (int24 earlyTwapTick,) = OracleLibrary.consult(address(pool), secondsAgo + 5 minutes);
+    int24 deviation = earlyTwapTick > twapTick ? earlyTwapTick - twapTick : twapTick - earlyTwapTick;
+    int24 needTick = deviation <= maxDeviation ? twapTick : earlyTwapTick;
+    amountOut = OracleLibrary.getQuoteAtTick(needTick, amountIn, tokenIn, tokenOut);
     decimalsOut = IERC20Metadata(tokenOut).decimals();
+  }
+
+  function setMaxDeviation(int24 _maxDeviation) external onlyOwner {
+    maxDeviation = _maxDeviation;
+  }
+
+  function ownerTransfer(address newOwner) external onlyOwner {
+    owner = newOwner;
+  }
+
+  modifier onlyOwner {
+    require(msg.sender == owner, "!owner");
+    _;
   }
 }
